@@ -53,7 +53,7 @@ Make pi a *coding* agent specifically: stop dangerous or sloppy actions before t
 
 | Package | Role |
 |---|---|
-| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard, reminder injection, and destructive-bash guard — blocks workspace escapes and catastrophic shell commands, redirects raw `cat`/`grep`/`sed` to dedicated tools. |
+| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard, reminder injection, and destructive-bash guard — blocks workspace escapes and catastrophic shell commands, redirects raw `cat`/`grep`/`sed` to dedicated tools. Real time streaming level prompt injection and abort available for advanced custom guardrails. |
 | [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored `read`/`edit`: every edit cites a `LINE#HASH`, so stale or misaligned edits are rejected instead of silently corrupting a file. |
 | `ponytail-lite` *(umbrella glue)* | Lazy senior-dev persona (`off`/`lite`/`full`/`ultra`) — enforces the stdlib-first "ladder", bans speculative abstractions, mandates one self-check per non-trivial change. |
 | `zz-design-principles` *(umbrella glue)* | Injects a software-design manifesto + surgical-changes discipline (loads last so other injectors compose first). |
