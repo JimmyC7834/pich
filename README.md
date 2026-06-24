@@ -4,6 +4,63 @@ A composable **harness** for the [pi coding agent](https://github.com/earendil-w
 
 Like pi itself — which is just four packages composed together — pich is many small packages plus an umbrella. Use one, use all, or build your own loadout.
 
+## Design
+
+The harness is organized as **three layers**, each answering a different question about an agent's context window — plus a handful of quality-of-life extras. Together they keep the model well-fed, lean, and cheap to drive.
+
+> **1 · Get the right information in** — so the model works from facts, not guesses.
+> **2 · Keep the context window lean** — so those facts cost as few tokens as possible.
+> **3 · Stay out of the way** — minimal, opt-in workflow tools instead of a heavy framework.
+> **+ Quality-of-life** — small ergonomics: memory, persona, notifications, dashboard.
+
+### Layer 1 — Information fetching
+
+Pull exactly the right code, docs, web content, and capabilities into context on demand — no blind grepping, no stale dumps.
+
+| Package | Role |
+|---|---|
+| [`pi-semble`](packages/pi-semble) | Semantic + lexical search over this repo's code **and** the local doc library (`repo_search` / `kb_search` / `find_related`). |
+| [`pi-web-tools`](packages/pi-web-tools) | Web search, URL fetch, GitHub clone, PDF/YouTube/video extraction. |
+| [`pi-capability-index`](packages/pi-capability-index) | Skill/tool registry: discover, activate, and load only the capabilities a task needs. |
+| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored `read`/`edit` — precise reads and edits that survive reordering and compaction. |
+| `code-vocab` *(umbrella glue)* | ctags symbol atlas; redirects naive code discovery to structured lookups. |
+
+### Layer 2 — Token & context-window optimization
+
+Every token earned in Layer 1 is spent carefully here: collapse the bulky, compact early, and measure the spend.
+
+| Package | Role |
+|---|---|
+| [`pi-context-collapse`](packages/pi-context-collapse) | Write-once collapse of bulky tool output to a short deterministic summary; original is recoverable with `expand`. |
+| [`pi-autocompact`](packages/pi-autocompact) | Proactive compaction (50% threshold) using a cheap, configurable summarizer + middle-of-zone tool-result stripping. |
+| [`pi-usage-recorder`](packages/pi-usage-recorder) | Per-turn token / cache / cost / context-fill telemetry — the measurement that makes the rest tunable. |
+
+*(Cross-cutting: `pi-capability-index` also caps the always-visible skills block, trimming the prompt prefix it contributes.)*
+
+### Layer 3 — Lightweight minimal workflow options
+
+Small, opt-in tools — not a framework. Each is one focused capability you can ignore until you want it.
+
+| Package | Role |
+|---|---|
+| [`pi-ralph`](packages/pi-ralph) | Kanban task board + iterative loop for structured multi-step work. |
+| [`filechanges`](packages/filechanges) | Live diff review of every edit, with accept / revert (fork of pi-config). |
+| [`telegram-remote`](packages/telegram-remote) | Drive a session from a Telegram bot — set a token and go. |
+| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard, reminder injection, and destructive-bash guard. |
+
+### Quality-of-life extras
+
+Small ergonomics that make the harness pleasant to live in. The single-file ones ship inside the umbrella; `notify` is its own package.
+
+| Feature | Role |
+|---|---|
+| [`notify`](packages/notify) | Native terminal notification (OSC 777/99 / Windows Toast) when the agent asks a question or finishes a turn. |
+| `memory` *(umbrella glue)* | Always-on long-term memory — hand-editable one-liner facts injected each turn. |
+| `ponytail-lite` *(umbrella glue)* | Lazy senior-dev persona (`off`/`lite`/`full`/`ultra`) that enforces minimal, stdlib-first solutions. |
+| `zz-design-principles` *(umbrella glue)* | Injects a software-design manifesto + surgical-changes discipline (loads last so others compose first). |
+| `startup-logo` *(umbrella glue)* | Custom startup dashboard: ASCII logo + session/model/branch info. |
+| `sysprompt-to-user` *(umbrella glue)* | Surfaces system-prompt content to the user for transparency. |
+
 ## Install
 
 **Everything (1-click):**
@@ -30,22 +87,7 @@ apps/          pi-vscode IDE companion (.vsix, installed separately)
 docs/          plans & specs
 ```
 
-### Packages
-
-| Package | What it does |
-|---|---|
-| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard + Reminder prompt injection + destructive-bash guard |
-| [`pi-context-collapse`](packages/pi-context-collapse) | Deterministic write-once collapse of bulky tool output |
-| [`pi-capability-index`](packages/pi-capability-index) | Skill/tool library & discovery, activation, loadouts (+ capability browser) |
-| [`pi-ralph`](packages/pi-ralph) | Kanban task board for structured multi-step work |
-| [`pi-semble`](packages/pi-semble) | Semantic codebase and documentation indexing & retrieval |
-| [`pi-usage-recorder`](packages/pi-usage-recorder) | Token & context telemetry |
-| [`filechanges`](packages/filechanges) | Live diff review of every edit (fork of pi-config) |
-| [`telegram-remote`](packages/telegram-remote) | Drive a session from a Telegram bot |
-| [`notify`](packages/notify) | Native terminal notifications |
-| [`pi-autocompact`](packages/pi-autocompact) | Proactive, configurable-model compaction |
-| [`pi-web-tools`](packages/pi-web-tools) | Web search / fetch / extraction, slimmed, lightweight fork of pi-web-access |
-| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored read/edit tools |
+The 12 packages map onto the three layers above; the umbrella also bundles the single-file glue (`code-vocab`, `memory`, `ponytail-lite`, `zz-design-principles`, `startup-logo`, `sysprompt-to-user`) and the `init` bin.
 
 ## Development
 
