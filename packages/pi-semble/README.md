@@ -76,3 +76,9 @@ enabled, so they keep working with no prompt. To re-decide a declined repo, dele
 Warm-MCP transport (a lazily-spawned, warm semble MCP server for ~ms queries instead of the
 ~1.4 s per-call `uvx` startup) is a future internal swap behind the same engine interface — see
 `docs/superpowers/plans/2026-06-20-semble-search-integration.md`, Phase 8.
+
+## Credits
+
+The search engine is **[semble](https://github.com/MinishLab/semble)** by [MinishLab](https://github.com/MinishLab),
+pulled at runtime via `uvx --from "semble[mcp]" semble`. This extension is a thin pi integration layer
+(tools, indexing lifecycle, provenance) over their package — all retrieval credit goes to MinishLab.

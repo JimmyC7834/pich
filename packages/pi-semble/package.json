@@ -24,6 +24,9 @@
   },
   "license": "MIT",
   "author": "jc4649",
+  "contributors": [
+    "MinishLab (semble search engine — https://github.com/MinishLab/semble)"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JimmyC7834/pich.git",

@@ -34,18 +34,18 @@ docs/          plans & specs
 
 | Package | What it does |
 |---|---|
-| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard + destructive-bash guard |
+| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard + Reminder prompt injection + destructive-bash guard |
 | [`pi-context-collapse`](packages/pi-context-collapse) | Deterministic write-once collapse of bulky tool output |
-| [`pi-capability-index`](packages/pi-capability-index) | Skill/tool discovery, activation, loadouts (+ capability browser) |
+| [`pi-capability-index`](packages/pi-capability-index) | Skill/tool library & discovery, activation, loadouts (+ capability browser) |
 | [`pi-ralph`](packages/pi-ralph) | Kanban task board for structured multi-step work |
-| [`pi-semble`](packages/pi-semble) | Semantic repo search |
+| [`pi-semble`](packages/pi-semble) | Semantic codebase and documentation indexing & retrieval |
 | [`pi-usage-recorder`](packages/pi-usage-recorder) | Token & context telemetry |
-| [`filechanges`](packages/filechanges) | Live diff review of every edit |
+| [`filechanges`](packages/filechanges) | Live diff review of every edit (fork of pi-config) |
 | [`telegram-remote`](packages/telegram-remote) | Drive a session from a Telegram bot |
 | [`notify`](packages/notify) | Native terminal notifications |
-| [`pi-autocompact`](packages/pi-autocompact) | Proactive, configurable-model compaction (formerly deepseek-compact) |
-| [`pi-web-tools`](packages/pi-web-tools) | Web search / fetch / extraction (fork of pi-web-access) |
-| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored read/edit tools (fork) |
+| [`pi-autocompact`](packages/pi-autocompact) | Proactive, configurable-model compaction |
+| [`pi-web-tools`](packages/pi-web-tools) | Web search / fetch / extraction, slimmed, lightweight fork of pi-web-access |
+| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored read/edit tools |
 
 ## Development
 
@@ -61,7 +61,14 @@ npm run publish:all
 
 ## Credits
 
-`pi-web-tools` is a fork of [pi-web-access](https://github.com/nicobailon/pi-web-access) by Nico Bailon. `pi-hashline-edit` is inspired by [RimuruW's pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit). Both MIT; original copyright lines preserved.
+This harness builds on the work of others:
+
+- **`pi-web-tools`** — fork of [pi-web-access](https://github.com/nicobailon/pi-web-access) by Nico Bailon (MIT).
+- **`pi-hashline-edit`** — inspired by [RimuruW's pi-hashline-edit](https://github.com/RimuruW/pi-hashline-edit) (MIT).
+- **`filechanges`** — fork of [pi-config](https://github.com/amosblomqvist/pi-config) by amosblomqvist (MIT).
+- **`pi-semble`** — search powered by [semble](https://github.com/MinishLab/semble) by MinishLab.
+
+Forks preserve the original copyright lines in their `LICENSE`; see each package's README for details.
 
 ## License
 

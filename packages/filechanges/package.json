@@ -13,6 +13,9 @@
   },
   "license": "MIT",
   "author": "jc4649",
+  "contributors": [
+    "amosblomqvist (original pi-config)"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JimmyC7834/pich.git",

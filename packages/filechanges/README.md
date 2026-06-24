@@ -1,6 +1,8 @@
-# filechanges (pi extension)
+# @jc4649/filechanges
 
 Tracks files changed (modified/created) by **pi** via the built-in `edit` and `write` tools.
+
+> **Fork notice:** forked from [`pi-config`](https://github.com/amosblomqvist/pi-config) by **amosblomqvist** (MIT). Credit for the original filechanges extension goes to them; see [LICENSE](./LICENSE) for both copyright lines.
 
 ## Features
 
