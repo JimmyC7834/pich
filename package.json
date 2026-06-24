@@ -1,0 +1,23 @@
+{
+  "name": "pich",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Monorepo for the pich harness: composable @jc4649/* pi coding-agent extensions plus the @jc4649/pi-harness umbrella (1-click install). apps/pi-vscode installs separately.",
+  "workspaces": [
+    "packages/*",
+    "harness/pi-harness"
+  ],
+  "scripts": {
+    "test": "npm run test --workspaces --if-present",
+    "check": "npm run check --workspaces --if-present",
+    "version:all": "npm version --workspaces --include-workspace-root",
+    "publish:all": "npm publish --workspaces --access public"
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git"
+  }
+}

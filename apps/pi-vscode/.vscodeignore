@@ -1,0 +1,8 @@
+.vscode/**
+src/**
+tsconfig.json
+.gitignore
+hub-app/**
+hub-app-vscode/**
+vitest.config.ts
+**/*.test.ts

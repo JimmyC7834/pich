@@ -1,0 +1,6 @@
+{
+  "botToken": "123456789:AA-replace-with-the-token-from-BotFather",
+  "chatId": 123456789,
+  "deliverAs": "steer",
+  "pollTimeoutSec": 30
+}

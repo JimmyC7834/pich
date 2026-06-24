@@ -1,0 +1,25 @@
+# Dependencies & build output
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+out/
+
+# Secrets / runtime — never commit (provided post-install in ~/.pi)
+telegram-remote.json
+telegram-remote.log
+*.db
+*.db-*
+
+# Tool-generated backups
+*.bak
+*.bak.*
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.stackdump
+
+# OS / editor cruft
+nul
+.DS_Store

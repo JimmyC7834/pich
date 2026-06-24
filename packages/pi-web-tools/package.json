@@ -1,0 +1,46 @@
+{
+  "name": "@jc4649/pi-web-tools",
+  "version": "0.1.0",
+  "description": "Web search, URL fetching, GitHub repo cloning, PDF/YouTube/video extraction for the pi coding agent. Slimmed fork of pi-web-access by Nico Bailon.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extension",
+    "web-search",
+    "fetch",
+    "scraping"
+  ],
+  "author": "jc4649",
+  "contributors": [
+    "Nico Bailon (original pi-web-access)"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "packages/pi-web-tools"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "linkedom": "^0.16.0",
+    "node-html-markdown": "^1.3.0",
+    "p-limit": "^6.1.0",
+    "unpdf": "^1.6.2"
+  },
+  "files": [
+    "*.ts",
+    "!*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+node_modules/
+.pi-collapse.db
+.pi-collapse.db-*
+.pi-collapse-metrics.jsonl

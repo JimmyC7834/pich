@@ -1,0 +1,47 @@
+{
+  "name": "@jc4649/pi-toolcall-guard",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Deterministic tool-call guard for pi: path preflight, schema/repair, content rules, error enrichment, and destructive-bash blocking (interactive confirm + headless subagent hard-block)",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "report": "node scripts/report.mjs"
+  },
+  "dependencies": {
+    "shell-quote": "^1.8.3"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@types/node": "^22.0.0",
+    "@types/shell-quote": "^1.7.5",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "packages/pi-toolcall-guard"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extension",
+    "toolcall-guard"
+  ],
+  "files": [
+    "index.ts",
+    "src",
+    "prompts",
+    "README.md",
+    "LICENSE"
+  ]
+}

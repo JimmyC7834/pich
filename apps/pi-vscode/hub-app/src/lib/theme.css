@@ -1,0 +1,9 @@
+:root { color-scheme: light dark; }
+body { font-family: var(--vscode-font-family); font-size: var(--vscode-font-size);
+  color: var(--vscode-foreground); background: var(--vscode-editor-background); margin: 0; }
+button { font: inherit; color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background); border: none; border-radius: 2px;
+  padding: 3px 8px; cursor: pointer; }
+button:hover { background: var(--vscode-button-hoverBackground); }
+input { background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+  border: 1px solid var(--vscode-input-border, transparent); border-radius: 2px; padding: 3px 6px; }

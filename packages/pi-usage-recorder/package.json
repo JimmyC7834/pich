@@ -1,0 +1,42 @@
+{
+  "name": "@jc4649/pi-usage-recorder",
+  "version": "0.1.0",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "packages/pi-usage-recorder"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extension",
+    "usage-recorder"
+  ],
+  "files": [
+    "index.ts",
+    "src",
+    "prompts",
+    "README.md",
+    "LICENSE"
+  ],
+  "description": "pi coding-agent extension: pi-usage-recorder"
+}

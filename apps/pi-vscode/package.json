@@ -1,0 +1,152 @@
+{
+  "name": "pi-vscode",
+  "displayName": "pi",
+  "description": "IDE sidebar companion for pi coding agent",
+  "version": "0.1.0",
+  "publisher": "pi",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:pi.start",
+    "onCommand:pi.openHub",
+    "onView:pi.hubView"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "pi-hub",
+          "title": "Pi Agent Hub",
+          "icon": "$(hubot)"
+        },
+        {
+          "id": "pi-hub-vscode",
+          "title": "Pi Agent Hub (VSCode UI)",
+          "icon": "$(symbol-color)"
+        }
+      ]
+    },
+    "views": {
+      "pi-hub": [
+        {
+          "type": "webview",
+          "id": "pi.hubView",
+          "name": "Hub"
+        }
+      ],
+      "pi-hub-vscode": [
+        {
+          "type": "webview",
+          "id": "pi.hubView.vscode",
+          "name": "Hub (VSCode UI)"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "pi.start",
+        "title": "pi: Start (launch + connect)"
+      },
+      {
+        "command": "pi.connect",
+        "title": "pi: Connect (to running pi)"
+      },
+      {
+        "command": "pi.stop",
+        "title": "pi: Stop"
+      },
+      {
+        "command": "pi.newSession",
+        "title": "pi: New Session"
+      },
+      {
+        "command": "pi.forkSession",
+        "title": "pi: Fork Here"
+      },
+      {
+        "command": "pi.resumeSession",
+        "title": "pi: Resume Session"
+      },
+      {
+        "command": "pi.showDiff",
+        "title": "pi: Show Diff"
+      },
+      {
+        "command": "pi.openKBDoc",
+        "title": "pi: Open KB Document"
+      },
+      {
+        "command": "pi.inspectSkill",
+        "title": "pi: Inspect Skill"
+      },
+      {
+        "command": "pi.inspectTool",
+        "title": "pi: Inspect Tool"
+      },
+      {
+        "command": "pi.refreshCapabilities",
+        "title": "pi: Refresh Capabilities",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "pi.stageFiles",
+        "title": "pi: Stage Changes (checkpoint diff baseline)",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "pi.runSkill",
+        "title": "pi: Run Skill"
+      },
+      {
+        "command": "pi.openHub",
+        "title": "pi: Open Agent Hub",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "pi.openHubVscode",
+        "title": "pi: Open Agent Hub (VSCode UI)",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "pi.hub.refresh",
+        "title": "pi: Refresh Hub",
+        "icon": "$(refresh)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "pi.openHub",
+        "key": "ctrl+shift+alt+p"
+      }
+    ]
+  },
+  "pi": {
+    "extensions": [
+      "./bridge/index.ts"
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npx tsc -p tsconfig.json && npm --prefix hub-app install && npm --prefix hub-app run build && npm --prefix hub-app-vscode install && npm --prefix hub-app-vscode run build",
+    "compile": "npx tsc -p tsconfig.json && npm --prefix hub-app install && npm --prefix hub-app run build && npm --prefix hub-app-vscode install && npm --prefix hub-app-vscode run build",
+    "watch": "npx tsc -watch -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@types/node": "^26.0.0",
+    "@types/vscode": "^1.90.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.9"
+  }
+}

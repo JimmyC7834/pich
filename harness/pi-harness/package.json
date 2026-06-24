@@ -1,0 +1,66 @@
+{
+  "name": "@jc4649/pi-harness",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "1-click umbrella for the pich harness: pulls all 12 @jc4649/* pi extensions, bundles the personal glue + code-vocab tooling, and ships an `init` bin that wires them into ~/.pi.",
+  "bin": {
+    "pi-harness": "bin/init.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/code-vocab-wire.ts",
+      "./extensions/memory.ts",
+      "./extensions/ponytail-lite.ts",
+      "./extensions/sysprompt-to-user.ts",
+      "./extensions/startup-logo.ts",
+      "./extensions/zz-design-principles.ts"
+    ]
+  },
+  "dependencies": {
+    "@jc4649/filechanges": "^0.1.0",
+    "@jc4649/notify": "^0.1.0",
+    "@jc4649/pi-autocompact": "^0.1.0",
+    "@jc4649/pi-capability-index": "^0.1.0",
+    "@jc4649/pi-context-collapse": "^0.1.0",
+    "@jc4649/pi-hashline-edit": "^0.1.0",
+    "@jc4649/pi-ralph": "^0.1.0",
+    "@jc4649/pi-semble": "^0.1.0",
+    "@jc4649/pi-toolcall-guard": "^0.1.0",
+    "@jc4649/pi-usage-recorder": "^0.1.0",
+    "@jc4649/pi-web-tools": "^0.1.0",
+    "@jc4649/telegram-remote": "^0.1.0",
+    "typebox": "^1.1.24"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "harness/pi-harness"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "harness",
+    "umbrella"
+  ],
+  "files": [
+    "extensions",
+    "code-vocab",
+    "agents",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ]
+}

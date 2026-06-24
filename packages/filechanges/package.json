@@ -1,0 +1,35 @@
+{
+  "name": "@jc4649/filechanges",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "pi coding-agent extension: live diff review of every file edit during a session",
+  "dependencies": {
+    "diff": "^5.2.0"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "packages/filechanges"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extension",
+    "filechanges"
+  ],
+  "files": [
+    "index.ts",
+    "src",
+    "prompts",
+    "README.md",
+    "LICENSE"
+  ]
+}

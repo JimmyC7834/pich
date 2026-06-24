@@ -1,0 +1,11 @@
+# Normalize line endings to LF in the repo for all text files.
+# Keeps cross-platform checkouts byte-stable (prompt-example tests parse on \n).
+* text=auto eol=lf
+
+# Explicit binaries — never touch.
+*.vsix binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.mp4 binary
+*.exe binary

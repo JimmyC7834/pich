@@ -1,0 +1,1060 @@
+# `code-vocab/` — full design + implementation spec
+
+A toolkit that gives an LLM agent a token-budgeted understanding of a codebase. It produces (a) a markdown brief the agent auto-attaches, and (b) two CLI tools the agent calls to drill in. No embeddings, no API, no GPU.
+
+This document is a 1:1 replication spec — another agent should be able to recreate the package from this file alone.
+
+> **Architecture note (kept in sync with the code).** The reference graph has
+> evolved past the single lexical token-graph this document originally
+> described. The shipped engine is **tiered**:
+>
+> 1. **Python** → real AST via stdlib `ast`.
+> 2. **TS / JS / TSX / JSX** → real AST via `tree-sitter` (optional dep).
+> 3. **Generic tier** → real AST via `tree-sitter-language-pack` (optional dep),
+>    driven by declarative `LangSpec`s in `langspec.py` (Go today; add a
+>    language = add one `LangSpec`, no parser changes).
+> 4. **Everything else / uninstalled grammars** → the comment/string-stripped
+>    lexical token-graph described in §9.4.
+>
+> All AST tiers produce a common `FileAst` IR and share one attribution engine
+> (`_attribute_ref` / `_resolve_symbol` / `build_re_exports`), so PageRank,
+> atlas, and section rendering (§10–§17) are unchanged regardless of source
+> language. §9 documents both the AST tiers (§9.1–§9.3) and the lexical
+> fallback (§9.4). The optional tree-sitter deps mean "zero runtime deps" now
+> holds only for the **core**; the lexical tier remains stdlib-only and is the
+> always-available floor.
+
+---
+
+## 1. Design goals (in priority order)
+
+1. **Cheap orientation.** A first-turn atlas costs ≤ 2 k tokens regardless of repo size. Auto-attached.
+2. **Cheap structural drill-in.** The agent can ask for one folder at a time (1–3 k tokens) instead of paying for the whole repo.
+3. **Cheap exact lookups.** "Where is `X` defined?" / "Who calls `X`?" runs in milliseconds against a local index, with deterministic output.
+4. **Zero runtime deps in Python.** Stdlib only. One external binary (`ctags`); ripgrep optional with a pure-Python fallback.
+5. **Determinism.** Same source tree → same atlas → same hits, every time.
+6. **Offline-safe.** Nothing reaches the network.
+7. **One paste-in `AGENT_PROMPT.md`** that teaches the agent how to use the tools.
+
+Explicitly **out of scope**: paraphrase retrieval (concept queries with zero token overlap), prose/doc semantic search, cross-language synonym matching. Layer a vector DB on top if needed; `code-vocab` is grep-class on the ~80% of agent queries that are about *structure and naming*.
+
+---
+
+## 2. Package file inventory
+
+All files live in a single folder named `code-vocab/` at the host repo's root.
+
+| File | Lines | Role |
+|---|---|---|
+| `make_vocab.py` | ~1800 | Builds `vocabulary.md` (atlas / full / section modes). Core is stdlib-only; AST tiers use optional tree-sitter deps. |
+| `langspec.py` | ~140 | Declarative per-language config (`LangSpec`) for the generic tree-sitter AST tier. One `LangSpec` per language; Go ships bundled. |
+| `vocab_find.py` | ~250 | CLI symbol lookup over `tags.json`. Defines mode (ctags) and usages mode (ripgrep + Python fallback). |
+| `build.ps1` | ~75 | Windows wrapper: invoke `ctags` then `make_vocab.py`. |
+| `build.sh` | ~50 | bash equivalent of `build.ps1`. |
+| `AGENT_PROMPT.md` | ~40 | The short contract to paste into the agent's system prompt. Language-agnostic — unchanged by the AST tiers. |
+| `README.md` | ~150 | Human-facing README (the file you're replicating from). |
+| `gitignore.recommended` | 4 | Patterns to add to host repo's `.gitignore`. |
+
+Generated artifacts (live at the host repo root, not in `code-vocab/`):
+
+- `tags.json` — Universal Ctags JSON-Lines output.
+- `tags.json.cache` — JSON cache of (files, edges, defines, sym_refs, pr), keyed on `tags.json` mtime+size.
+- `vocabulary.md` — the markdown brief the agent auto-attaches.
+
+---
+
+## 3. Prerequisites
+
+- **Universal Ctags ≥ 6.x** on PATH. (`winget install UniversalCtags.Ctags` / `brew install universal-ctags` / `apt install universal-ctags`). ctags still drives `vocab_find` definitions and the lexical fallback tier.
+- **Python ≥ 3.10** (uses PEP 604 `str | None` unions). Core is stdlib-only.
+- **Optional:** `ripgrep` for `vocab_find --usages` (pure-Python fallback exists). `pip install tiktoken` for accurate token counts (char/4 fallback exists).
+- **Optional (AST tiers):**
+  - `pip install tree-sitter tree-sitter-typescript` — real AST for TS/JS/TSX/JSX.
+  - `pip install tree-sitter-language-pack` (~30–40 MB, ~165 grammars) — the generic AST tier for every `LangSpec` in `langspec.py` (Go today).
+  - Without either, the affected languages degrade to the lexical token-graph (§9.4). Nothing else changes.
+
+---
+
+## 4. End-to-end build pipeline
+
+```
+                         ┌─────────────────────────────────────────────┐
+ctags --recurse          │ tags.json   (JSON-Lines, one tag per line) │
+--output-format=json   ──▶                                             │
+--fields=+nKzS           │   {"_type":"tag","name":"Foo",              │
+                         │    "path":"src/x.py","kind":"class",        │
+                         │    "line":12,"scope":"...",                 │
+                         │    "scopeKind":"...","signature":"..."}     │
+                         └────────────────────┬────────────────────────┘
+                                              │
+                                              ▼
+                         ┌─────────────────────────────────────────────┐
+                         │ make_vocab.py                               │
+                         │  ── EXTRACT ──                              │
+                         │     load_tags()                             │
+                         │     extract_facts() per file                │
+                         │       Python: AST → docstring,              │
+                         │         UPPER_SNAKE constants,              │
+                         │         class fields (AnnAssign)            │
+                         │       Other: generic lead-doc parser,       │
+                         │         generic UPPER_SNAKE regex           │
+                         │     extract_routes() (FastAPI @app./@router.)│
+                         │     project_metadata() (pyproject + pkg.json)│
+                         │     extract_glossary() (top-level README)   │
+                         │     folder_tree() (depth 2)                 │
+                         │                                             │
+                         │  ── SCORE ──                                │
+                         │     build_graph_v2()  (tiered, §9.1)        │
+                         │       py/ts/generic → FileAst → attribute   │
+                         │       else → lexical token-graph (§9.4)     │
+                         │       edges: src→dst weighted by # of refs  │
+                         │     pagerank() — file-level                 │
+                         │     cache (files, edges, defines,           │
+                         │            sym_refs, pr) keyed by tags mtime│
+                         │                                             │
+                         │  ── RENDER ──                               │
+                         │     ModuleItem L0..L3                       │
+                         │     allocate() greedy by score              │
+                         │     atlas: greedy folder bucketing          │
+                         │     section: scope filter + local PR        │
+                         │                                             │
+                         │ → vocabulary.md                             │
+                         └─────────────────────────────────────────────┘
+```
+
+---
+
+## 5. Data model and global constants
+
+### 5.1 Module-level constants (copy verbatim)
+
+```python
+WORD_RE = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{2,}\b")
+TEST_PATH_RE = re.compile(
+    r"(^|/)tests?/|(^|/)test_[^/]+\.py$|\.(test|spec)\.[tj]sx?$"
+)
+
+NOISE_NAMES = frozenset({
+    "void", "this", "self", "resolve", "reject", "then", "catch", "finally",
+    "process", "window", "document", "value", "name", "data", "result",
+    "error", "err", "item", "items", "args", "opts", "options", "config",
+    "context", "input", "output", "target", "source", "key", "index",
+    "time", "date", "timer", "timeout", "width", "height", "size", "text",
+    "code", "line", "lines", "path", "file", "files", "node", "nodes",
+    "branch", "main", "init", "start", "stop", "run", "exec", "call",
+    "send", "receive", "open", "close", "read", "write", "load", "save",
+    "get", "set", "add", "remove", "update", "create", "delete", "clear",
+    "move", "copy", "render", "draw", "paint", "toggle", "space", "heading",
+    "prompt", "stream", "complete", "login", "logout", "notify", "cleanup",
+    "question", "padLine", "client", "server", "step", "steps", "phase",
+    "keyHint", "keyText", "flag", "flags", "state", "states",
+})
+
+_BLOCK_COMMENTS = [
+    ('"""', '"""'),
+    ("'''", "'''"),
+    ("/**", "*/"),
+    ("/*", "*/"),
+    ("<!--", "-->"),
+    ("=begin", "=end"),
+]
+_LINE_COMMENT_PREFIXES = ("#", "//", "---", "--", ";;")
+
+_CONST_RE = re.compile(
+    r"^(?:export\s+|pub\s+)?(?:const\s+|let\s+|var\s+)?([A-Z][A-Z0-9_]{2,})\s*[:=]"
+)
+_CONST_VAL_RE = re.compile(r"[:=]\s*(.+?)(?://|/\*|$)")
+
+KIND_PRIORITY = {"class": 0, "function": 1, "method": 2, "variable": 3}
+```
+
+`NOISE_NAMES` is **only** applied when picking headline symbols for the atlas; it is **not** filtered out of the graph or `vocab_find`.
+
+### 5.2 `ModuleItem` dataclass
+
+```python
+@dataclass
+class ModuleItem:
+    path: str
+    score: float
+    pr_pct: float
+    n_public: int
+    L0: str   # one-line listing
+    L1: str   # path + public count + PR%
+    L2: str   # heading + docstring + top-8 public
+    L3: str   # heading + docstring + classes + constants + top-20 public
+    def render(self, level: int) -> str:
+        return getattr(self, f"L{level}")
+```
+
+### 5.3 `FolderBucket` dataclass
+
+```python
+@dataclass
+class FolderBucket:
+    prefix: str       # e.g. "src/core"
+    files: list[str]  # source paths under this prefix
+    pr_pct: float     # sum of pr_pct of contained files
+```
+
+---
+
+## 6. Token counting
+
+```python
+try:
+    import tiktoken
+    _ENC = tiktoken.get_encoding("cl100k_base")
+    def count_tokens(text: str) -> int:
+        return len(_ENC.encode(text))
+except Exception:
+    def count_tokens(text: str) -> int:
+        return max(1, len(text) // 4)
+```
+
+`tiktoken` is **never required**. The fallback (`len // 4`) is good enough for budget allocation.
+
+---
+
+## 7. Tags loading (`load_tags`)
+
+ctags JSON output is JSON-Lines (one JSON object per line). Each useful line has `"_type": "tag"`. Lines without `_type: tag` (e.g. ptags) are silently skipped.
+
+```python
+def load_tags(tags_path: Path) -> list[dict]:
+    if not tags_path.exists():
+        raise SystemExit(
+            f"tags file not found: {tags_path}\n"
+            "Run `ctags --recurse --output-format=json ...` first; see README.md."
+        )
+    out: list[dict] = []
+    for line in tags_path.read_text(encoding="utf-8").splitlines():
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if obj.get("_type") == "tag":
+            out.append(obj)
+    return out
+```
+
+Each tag has the keys: `name`, `path`, `kind`, `line`, optional `scope`, optional `scopeKind`, optional `signature`. The `--fields=+nKzS` ctags flag (see §19) is what makes these present.
+
+---
+
+## 8. Per-file extraction
+
+### 8.1 `is_test_path(path) -> bool`
+
+`TEST_PATH_RE` excludes test paths. Test files are excluded from `ModuleItem` rendering but **not** from PageRank.
+
+### 8.2 `safe_read(root, rel, limit=1_500_000) -> str`
+
+Reads `root/rel.removeprefix("./")` with `utf-8` + `errors="ignore"`, skips files > 1.5 MB or non-files. Returns `""` on any `OSError`.
+
+### 8.3 `extract_python_facts(root, rel) -> dict`
+
+Returns `{"docstring": str, "constants": [(name, val_repr)], "classes": {cls_name: [(field_name, type_str)]}, "has_routes": bool}`.
+
+Algorithm:
+- Read source. If unreadable → return empty defaults.
+- `has_routes` = `True` if `"@app."` or `"@router."` appears anywhere in source.
+- Parse with `ast.parse`. On `SyntaxError`, return what we have.
+- `docstring` = first non-empty line of `ast.get_docstring(tree)`, max 160 chars.
+- Walk top-level `tree.body`:
+  - `ast.Assign` with single `Name` target where target id is `isidentifier()`, `isupper()`, length ≥ 3, starts with a letter → append `(name, ast.unparse(value))`. Drop if rendered value > 40 chars.
+  - `ast.ClassDef` → collect `ast.AnnAssign` children with `Name` target, name not `_`-prefixed. For each: `(name, ast.unparse(annotation).replace(" ", "")[:30])`. Only emit the class if it has at least one field.
+
+### 8.4 `extract_lead_doc(src) -> str` (language-agnostic)
+
+For non-Python files (and as a Python fallback when there's no AST docstring):
+
+1. If `src` starts with `#!`, drop the first line.
+2. Strip leading newlines.
+3. If next line starts with `# -*-` or `# coding`, drop it.
+4. Take first 3000 chars as `head`.
+5. **Block-comment path:** if `head.lstrip()` starts with any opener from `_BLOCK_COMMENTS`, find the matching closer. For each line of the body, strip a leading `* ` (JSDoc style) and return the first non-empty cleaned line (max 160 chars). If no closer is found or body is empty → return `""`.
+6. **Line-comment path:** walk `head.splitlines()`. For each line:
+   - Empty after `.lstrip()` → if block already accumulated, break; else continue.
+   - Doesn't start with any prefix in `_LINE_COMMENT_PREFIXES` → break.
+   - Otherwise strip the prefix and `.strip()`; append if non-empty.
+   - Cap at 5 collected lines.
+   Return `block[0][:160]` if any, else `""`.
+
+### 8.5 `extract_constants_generic(src) -> list[(name, val)]`
+
+Language-agnostic UPPER_SNAKE detector. Only scans the first 400 lines.
+
+For each line:
+- Skip empty / indented (starts with space or tab) → constants must be top-level.
+- Apply `_CONST_RE` (matches `[export ][pub ][const|let|var ]NAME[:=]`).
+- Extract value via `_CONST_VAL_RE`; right-trim `;,`; truncate values > 40 chars to `val[:37] + "\u2026"`.
+- Stop after 8 constants.
+
+### 8.6 `extract_facts(root, rel) -> dict`
+
+Dispatcher:
+- `.py` → `extract_python_facts`; if its docstring is empty, fill from `extract_lead_doc`.
+- Anything else → `{"docstring": extract_lead_doc(src), "constants": extract_constants_generic(src), "classes": {}, "has_routes": False}`.
+
+### 8.7 `project_metadata(root) -> list[str]`
+
+Pulls **Name**, **Description**, dependency lists, workspaces from up to one `pyproject.toml` (root or one-level-deep glob `*/pyproject.toml`) and one `package.json` at root. Output entries are formatted strings like `**Name:** \`my-pkg\``.
+
+Patterns used (regex against `pyproject.toml`):
+- `^name\s*=\s*"([^"]+)"` (multiline)
+- `^description\s*=\s*"([^"]+)"`
+- `dependencies\s*=\s*\[([^\]]*)\]` then `"([a-zA-Z0-9._\-]+)"` (first 10)
+
+For `package.json` it just `json.loads` and pulls `name`, `description`, top 10 dep keys, top 6 `workspaces`.
+
+Deduplicates entries via a `seen` set keyed on `f"{label}={value}"`.
+
+### 8.8 `extract_glossary(root) -> list[(title, first_line)]`
+
+Pulls H2 sections from the host repo's top-level `README.md`. Skip headings whose case-insensitive title is in `{"status","additional links","license","files","contributing"}`. Take the first non-empty line after the heading, strip leading bullets / numbered-list markers, keep only entries with `10 < len < 220`. Cap at 6.
+
+### 8.9 `extract_routes(root, files) -> list[(METHOD, path, handler, file)]`
+
+Parses FastAPI-style decorators in `.py` files only. Regex:
+
+```python
+re.compile(
+    r'@(?:app|router)\.(get|post|put|delete|patch)\(\s*["\']([^"\']+)["\'][^)]*\)'
+    r'\s*\n(?:async\s+)?def\s+([A-Za-z_]\w*)'
+)
+```
+
+Fast-skips files that don't contain `@app.` or `@router.`.
+
+### 8.10 `folder_tree(root, depth=2) -> list[str]`
+
+Sorted depth-2 directory listing rendered as a bulleted markdown tree. Skips:
+
+```
+{".git", ".venv", "venv", "node_modules", "dist", "build", "target",
+ "out", "__pycache__", ".idea", ".vscode", ".husky", ".github",
+ ".pytest_cache", ".mypy_cache", ".ruff_cache", ".tox", ".next",
+ ".nuxt", ".cache", ".turbo", "coverage", ".coverage"}
+```
+
+Also skips any folder that starts with `.` or ends with `.egg-info`.
+
+---
+
+## 9. Symbol reference graph + PageRank
+
+The graph builder returns `(files, edges, defines, sym_refs)`. The current
+entry point is **`build_graph_v2(root, tags)`** (§9.1), which dispatches each
+file to the richest tier whose backend is installed and merges the results.
+`build_reference_graph` (§9.4) is the original lexical token-graph; it survives
+as the always-available fallback for files no AST tier claimed.
+
+### 9.1 `build_graph_v2(root, tags)` — tiered dispatch
+
+```
+all_files (from tags)
+   │
+   ├─ .py                         → build_python_graph        (stdlib ast)
+   ├─ .ts/.tsx/.js/.jsx/.mjs/.cjs → build_typescript_graph    (tree-sitter, if installed)
+   ├─ ext in LANG_SPECS           → build_generic_graph(spec) (language-pack, if installed)
+   └─ everything else / uninstalled grammar
+                                  → _build_nonpython_graph    (lexical, §9.4)
+```
+
+- A `used_by_ast` set tracks files already claimed by an AST tier; the lexical
+  fallback is invoked with that set and **skips** those files, so each file is
+  attributed by exactly one tier.
+- Each AST tier parses files into a common **`FileAst`** IR
+  (`path, module, is_package, defines, imports, star_imports, references`) and
+  hands them to **`build_ast_graph_from_asts(asts)`**, the shared attribution
+  driver: it builds `module_index = {fa.module: fa.path}`, chases re-exports
+  (`build_re_exports`), filters `raw_defines` (keep classes; require
+  `len(name) >= 4` for non-classes), then resolves each reference via
+  `_attribute_ref` → `(dst, resolved_name)`, deduping edges per `(src, dst)`.
+- **`_attribute_ref`** order: local define → import (with re-export chase via
+  `_resolve_symbol`) → star import. There is **no single-global-definer
+  fallback** — a name a file neither defines nor imports yields *no edge*
+  (avoids false edges to built-ins/externals that happen to be redefined
+  elsewhere). For whole-module imports (`ImportRef(module=…, name="")`, e.g. Go
+  `import "fmt"` used as `fmt.Println`) it attributes to the module's own file.
+- The three result triples (AST tiers + lexical) are summed: `edges` weights
+  add, `defines` path-sets union, `sym_refs` counts add.
+
+### 9.1a Generic tree-sitter tier (`langspec.py` + `build_generic_graph`)
+
+Adding a language is **declarative**: append one `LangSpec` to `LANG_SPECS`
+(keyed by extension) with `def_nodes` (node-type → `class|function|constant`),
+`member_node`, `import_node`, `extract_imports` / `resolve_import` callbacks,
+`is_exported`, and `entry_patterns`. `parse_generic_ast(root, rel, spec)` then
+produces a `FileAst` exactly like `parse_ts_ast` but driven by the spec:
+
+- module identity == file path (set `fa.module = fa.path`);
+- `defines` holds **only exported** top-level names (`spec.is_exported`, e.g.
+  Go capitalization), so private names never create cross-file edges;
+- imports resolve to a repo-relative target via `spec.resolve_import`
+  (intra-repo only — stdlib/external specifiers return `None` ⇒ no edge);
+- references reuse `_ts_collect_refs(root_node, skip, member_node=…)`.
+
+`build_graph_v2` skips a spec whose grammar isn't installed
+(`_get_parser(spec.grammar) is None`) so those files fall through to §9.4. Go
+ships bundled; see `langspec.py` and the upgrade spec
+`docs/superpowers/plans/…` for the full per-language recipe and gotchas
+(import-namespace resolution, visibility rules, grouped declarations).
+
+> **Known limitation.** Go member access (`pkg.Sym`) is collected as a bare
+> module reference because `selector_expression` uses different field names
+> than the TS `member_expression` the shared collector expects. The file→file
+> **edge is correct** (via the whole-module-import path above), but `sym_refs`
+> attributes it to the module's last path segment rather than the symbol name.
+> `sym_refs` only feeds headline-symbol ranking, so PageRank/edges are
+> unaffected.
+
+### 9.2 `pagerank(nodes, edges, damping=0.85, max_iter=80, tol=1e-7)`
+
+Standard PageRank with dangling-mass redistribution, no personalization vector. Returns `{path: score}`. Tolerances and damping are fixed at the above defaults.
+
+```python
+def pagerank(nodes, edges, damping=0.85, max_iter=80, tol=1e-7):
+    n = len(nodes)
+    if n == 0: return {}
+    pr = {node: 1.0 / n for node in nodes}
+    out = {node: [] for node in nodes}
+    out_w = {node: 0.0 for node in nodes}
+    for (src, dst), w in edges.items():
+        if src in out and dst in out:
+            out[src].append((dst, w))
+            out_w[src] += w
+    for _ in range(max_iter):
+        teleport = (1 - damping) / n
+        dangling = sum(pr[node] for node in nodes if out_w[node] == 0)
+        new_pr = {node: teleport + damping * dangling / n for node in nodes}
+        for src in nodes:
+            ws = out_w[src]
+            if ws == 0: continue
+            base = damping * pr[src] / ws
+            for dst, w in out[src]:
+                new_pr[dst] += base * w
+        delta = sum(abs(new_pr[k] - pr[k]) for k in nodes)
+        pr = new_pr
+        if delta < tol: break
+    return pr
+```
+
+After PageRank, normalize to percentages:
+
+```python
+pr_total = sum(pr.values()) or 1.0
+pr_pct = {f: 100.0 * pr.get(f, 0.0) / pr_total for f in files}
+```
+
+### 9.3 Disk cache (`build_graph_cached`)
+
+Cache lives at `tags.json.cache` next to `tags.json`. Cache key is `f"{int(st.st_mtime_ns)}-{st.st_size}"` of `tags.json`. On cache hit, materialize the dicts; on miss, build & write. **Anything goes wrong reading the cache → silently rebuild.** Cache write failures are swallowed.
+
+Cache JSON shape:
+```json
+{
+  "key": "1717... -23456",
+  "files": ["src/a.py", "src/b.py"],
+  "edges": [["src/a.py", "src/b.py", 3]],
+  "defines": {"Foo": ["src/a.py"]},
+  "sym_refs": {"Foo": 7},
+  "pr": {"src/a.py": 0.012}
+}
+```
+
+The cache shape and key are unchanged by the AST tiers — `build_graph_v2`
+returns the same `(files, edges, defines, sym_refs)` tuple the cache already
+stores, so caching wraps whichever tier produced an edge transparently.
+
+### 9.4 Lexical fallback (`build_reference_graph` / `_build_nonpython_graph`)
+
+The original, always-available token-graph. Used for any file no AST tier
+claimed (uninstalled grammar, or a language with no AST tier). Stdlib-only.
+
+Returns `(files, edges, defines, sym_refs)`:
+
+1. **Define-set per name.** From tags, build `raw_defines: name -> {paths}` where:
+   - `kind` ∈ `{function, class, method}`.
+   - Name and path non-empty, name does NOT start with `_`.
+   - If `kind != "class"`, also require `len(name) >= 4`.
+   - If `scope` is set and `scopeKind` is NOT in `{"", "class"}`, skip (drops nested locals).
+2. **Drop ambiguous names.** `defines = {n: ps for n, ps in raw_defines.items() if len(ps) == 1}`. Names defined in multiple files are dropped — they can't be attributed.
+3. **Edges.** For each source file, read it (comment/string-stripped), tokenize with `WORD_RE`, dedupe to a set. For each token that hits `defines`, add an edge `(src, dst)` with weight = number of distinct hits. **No self-loops.**
+4. **Symbol-ref count.** `sym_refs[name]` increments once per (src, dst) attribution.
+
+`_build_nonpython_graph(root, tags, used_by_ast)` is the `build_graph_v2`
+wrapper: it runs the above over only the files **not** in `used_by_ast`. This
+is the tier that makes the token-match edges the AST tiers deliberately avoid;
+when an AST tier claims a file, its precise (import-driven) edges replace what
+the lexical scan would have guessed.
+
+---
+
+## 10. ModuleItem construction (`build_module_items`)
+
+For each file in `funcs_by_file`:
+
+1. Skip test paths.
+2. `public = sorted(n for n in funcs if not n.startswith("_"), key=lambda n: (-sym_refs[n], n))`.
+3. Skip entirely if no public symbols AND no facts AND no classes.
+4. Build the 4 strings:
+
+```
+L0 = "- `{path}`"
+
+L1 = "- `{path}` · {n_public} public · PR {pr_pct:.1f}%"
+
+L2 = "### `{path}` · PR {pr_pct:.1f}%"
+     "> {docstring}"                      # if any
+     "Public: `a`, `b`, ..., `h`"         # first 8
+
+L3 = "### `{path}` · PR {pr_pct:.1f}%"
+     "> {docstring}"
+     "- class `Name(field: Type, field2: T2, ...)`"   # per AST class, up to 8 fields
+                                                       # OR if no AST classes:
+     "Classes: `A`, `B`, ..."                          # up to 6
+     "Constants: `NAME=value`, ..."                    # up to 6
+     "Public: `a`, ..., +N"                            # up to 20, with +extra count
+```
+
+5. **Score** (drives the L3-first allocation order):
+```python
+score = pr_pct[path] + 0.01
+if facts["has_routes"]: score *= 1.5
+if docstring:           score *= 1.1
+```
+
+Sort items descending by score.
+
+---
+
+## 11. Greedy detail allocation (`allocate`)
+
+```python
+def allocate(items, budget):
+    selected = {}
+    remaining = budget
+    for it in items:
+        for level in (3, 2, 1, 0):
+            text = it.render(level)
+            cost = count_tokens(text) + 2   # +2 for the blank line separator
+            if cost <= remaining:
+                selected[it.path] = (level, text)
+                remaining -= cost
+                break
+    return selected
+```
+
+Highest-scoring files get the richest level that fits; everyone else degrades gracefully through L2 → L1 → L0. Default `budget = tokens_per_file * n_source_files` (where `tokens_per_file = 80` by default).
+
+---
+
+## 12. Atlas folder bucketing (`build_atlas_buckets`)
+
+Given the items list and `pr_pct`, expand folder depth greedily until adding another split would blow the atlas budget. The exact procedure is subtle — copy verbatim:
+
+```python
+def build_atlas_buckets(items, pr_pct, atlas_budget,
+                        min_files_to_expand=6,
+                        per_bucket_token_estimate=110):
+    sources = [it.path for it in items]
+    if not sources: return []
+    depth_by_path = {p: 1 for p in sources}
+
+    def buckets():
+        out = defaultdict(list)
+        for p in sources:
+            out[_file_folder(p, depth_by_path[p])].append(p)
+        return out
+
+    unsplittable = set()
+    while True:
+        cur = buckets()
+        cost = len(cur) * per_bucket_token_estimate
+        if cost > atlas_budget:
+            break
+        candidates = [
+            (prefix, paths) for prefix, paths in cur.items()
+            if len(paths) >= min_files_to_expand and prefix not in unsplittable
+        ]
+        if not candidates: break
+        candidates.sort(key=lambda kv: -len(kv[1]))
+        target_prefix, target_paths = candidates[0]
+        target_depth = depth_by_path[target_paths[0]]
+        for p in target_paths:
+            depth_by_path[p] = target_depth + 1
+        new_buckets = buckets()
+        new_for_target = [
+            paths for prefix, paths in new_buckets.items()
+            if set(paths).issubset(set(target_paths))
+        ]
+        if len(new_for_target) == 1:           # expansion didn't split → undo + mark
+            for p in target_paths:
+                depth_by_path[p] = target_depth
+            unsplittable.add(target_prefix)
+            continue
+        new_cost = len(new_buckets) * per_bucket_token_estimate
+        if new_cost > atlas_budget:
+            for p in target_paths:
+                depth_by_path[p] = target_depth
+            break
+
+    final = buckets()
+    out = []
+    for prefix, paths in final.items():
+        pr = sum(pr_pct.get(p, 0.0) for p in paths)
+        out.append(FolderBucket(prefix=prefix, files=sorted(paths), pr_pct=pr))
+    out.sort(key=lambda b: -b.pr_pct)
+    return out
+```
+
+Helper:
+
+```python
+def _file_folder(path: str, depth: int) -> str:
+    rel = path.removeprefix("./")
+    parts = rel.split("/")
+    if len(parts) <= depth:
+        return "/".join(parts[:-1]) or "."
+    return "/".join(parts[:depth])
+```
+
+Defaults: `per_bucket_token_estimate=110`, `min_files_to_expand=6`. The `unsplittable` set prevents oscillating on flat folders where deepening doesn't actually create new buckets.
+
+---
+
+## 13. Atlas rendering (`render_atlas`)
+
+```
+## Folder atlas
+
+_Folder roll-ups ranked by aggregate PageRank.
+To drill in, request `--mode section --scope <prefix>`._
+
+### `src/core/`  ·  12 files  ·  PR 34.2%
+- modules: `session`, `agent`, `tools`, ...
+- headline: `SessionManager`, `Tool`, ...
+- routes (3): `GET /a`, `POST /b`, ...
+- drill: `--mode section --scope src/core`
+```
+
+Headline symbols are picked as:
+
+```python
+local_syms = {
+    sym for sym, paths in defines.items()
+    if any(p in item_paths for p in paths) and sym not in NOISE_NAMES
+}
+ranked = sorted(local_syms, key=lambda s: -sym_refs.get(s, 0))[:5]
+```
+
+(`NOISE_NAMES` filter applies *only here*.) Modules shown: first 6 `Path(p).stem` of bucket items. Routes shown: first 4 from `routes_by_file`.
+
+---
+
+## 14. Header & full-mode extras
+
+`render_header(root, mode, scope)` emits:
+
+```
+# Codebase vocabulary: <root.name> (<mode>[ · scope `<scope>/`])
+
+_Auto-generated. Read before searching for unfamiliar concepts._
+
+## Project
+- **Name:** `...`
+- **Description:** ...
+- **Python deps:** `a`, `b`, ...
+...
+```
+
+In `full` mode (not `atlas`, not `section`), the orchestrator additionally emits:
+
+1. `## HTTP routes (FastAPI)` — flat list `- \`{METHOD:<6} {path}\` → \`{handler}\``.
+2. `## Domain notes (from README)` — bulleted glossary.
+3. `## Folder structure` — `folder_tree(depth=2)`.
+
+---
+
+## 15. Section mode
+
+Triggered by `--mode section --scope <prefix>`. Algorithm:
+
+1. `scope_prefix = scope.rstrip("/")`.
+2. Keep `items` whose path is `==scope_prefix` or starts with `scope_prefix + "/"`.
+3. If empty → `SystemExit(f"no source files under scope: {scope}")`.
+4. **Renormalize PR percentages** to the local subset: `it.pr_pct = 100.0 * it.pr_pct / local_total`. (So a section atlas reads as percentages-within-folder.)
+5. Run the same `allocate` → grouped L3/L2/L1/L0 render as `full` mode (no header tables — no routes / glossary / tree).
+
+---
+
+## 16. Module section header & grouping
+
+```
+## Modules[ in `<scope>/`]  ·  budget: <b> tok = <tokens_per_file> × <n_source> files
+_Greedy detail allocation: L3 full → L2 summary → L1 brief → L0 listed._
+
+### L3 — Top (full)
+<L3 of item 1>
+
+<L3 of item 2>
+...
+
+### L2 — Summary
+...
+
+### L1 — Brief
+...
+
+### L0 — Listed
+...
+```
+
+Iterate items in their score order; group into `by_level[level]`; emit sections in level order `(3, 2, 1, 0)` with an empty line between L3/L2 items (not L1/L0).
+
+---
+
+## 17. `make_vocab.py` CLI
+
+```
+usage: make_vocab.py [--root .] [--tags <path>] [--mode {full,atlas,section}]
+                     [--scope <rel>] [--tokens-per-file 80] [--budget N]
+                     [--atlas-budget 2000] [--out <path>]
+
+defaults:
+  --root           "."
+  --tags           "<root>/tags.json"
+  --mode           "full"
+  --tokens-per-file 80
+  --atlas-budget   2000
+  --budget         tokens_per_file * n_source_files
+  --out            "<root>/vocabulary.md"
+
+requirements:
+  --mode section requires --scope
+  --tags file must exist (load_tags errors out otherwise)
+
+final print line:
+  Wrote <relpath>: <N> tok (mode=<m>, files indexed=<k>)
+```
+
+---
+
+## 18. `vocab_find.py` CLI
+
+```
+usage: vocab_find.py [--tags tags.json] [--limit 20] [--regex] [--exact]
+                     [--scope <prefix>] [--kind <function|class|method|...>]
+                     [--usages] [--root .] <query>
+
+modes (mutually computed from query):
+  --regex            → mode = regex
+  --exact            → mode = exact
+  '*' or '?' in q    → mode = glob (fnmatch)
+  else               → mode = substring  (ranked: exact > prefix > substr > case-insens substr)
+
+--usages:
+  Find call-sites via ripgrep (preferred) or pure-Python fallback.
+  Pattern translation:
+    regex:     pattern = query
+    glob:      pattern = fnmatch.translate(query).rstrip("\\Z")
+    exact/sub: pattern = rf"\b{re.escape(query)}\b"
+  Search root = root, or root/scope if it exists.
+
+  ripgrep cmd: rg --json --no-heading --line-number
+               -g '!node_modules' -g '!dist' -g '!build' -g '!target'
+               -g '!__pycache__' -g '!.git' <pattern> <search_root>
+  Output lines parsed as JSON; only "type":"match" entries kept.
+  Fallback walker skips {node_modules,dist,build,target,__pycache__,.git,.venv,venv}
+  and any dir starting with '.'.
+  File extension allowlist:
+    .py .ts .tsx .js .jsx .mjs .cjs .go .rs .java .kt .rb .c .cc .cpp .h .hpp
+    .swift .cs .php .lua
+  Skips files > 1.5 MB.
+
+definitions mode ranking:
+  KIND_PRIORITY = {"class": 0, "function": 1, "method": 2, "variable": 3}
+  hits sorted by (rank, tie, kind_priority, name) ascending where
+  rank: exact=0 / startswith=1 / substr=2 / case-insens-substr=3.
+  Tie = len(name) (shorter wins).
+
+output (markdown to stdout):
+  # Matches for '<q>' (<mode>)[ [scope=..., kind=...]] — <n> shown
+
+  ## Top folders
+  - `<first-2-segments>/`  ·  <count>
+  ...
+  ## Hits
+  - <kind:<8>  `<path>:<line>` `<name>`  (<scope>)  <signature>
+```
+
+`--usages` produces the same shape but the per-hit line is:
+
+```
+- usage    `<path>:<line>`  <snippet[:120]>
+```
+
+`path_in_scope(path, scope)` uses prefix matching after `removeprefix("./")` and strips trailing `/` from `scope`.
+
+Exits with status 1 and a stderr message if no hits.
+
+---
+
+## 19. `build.ps1` and `build.sh` contracts
+
+Both wrappers do:
+
+1. Ensure `ctags` is on PATH (PowerShell version refreshes machine+user PATH if missing, then re-checks).
+2. Delete any existing `tags.json` in the host repo root.
+3. Run ctags with **exactly these flags** (do not change without updating §7):
+
+   ```
+   ctags \
+     --recurse \
+     --output-format=json \
+     --fields=+nKzS \
+     --languages=Python,JavaScript,TypeScript,Go,Rust,Java,Kotlin,Ruby,C,C++,C#,PHP,Lua \
+     --links=no \
+     --exclude=.git --exclude=node_modules --exclude=.venv \
+     --exclude=venv --exclude=dist --exclude=build \
+     --exclude=target --exclude=__pycache__ \
+     --exclude='*.egg-info' --exclude='*.min.js' \
+     --exclude=package-lock.json --exclude=yarn.lock \
+     --exclude=pnpm-lock.yaml --exclude='*.bundle.js' \
+     -f tags.json .
+   ```
+
+   `+nKzS` adds: line number (`n`), kind name (`K`), scope (`z`), signature (`S`).
+4. Invoke `python <code-vocab>/make_vocab.py --root <root> --tags <tagsPath> --mode <mode> --out <vocabPath> --tokens-per-file <n> --atlas-budget <n>`.
+5. Print artifact paths + sizes.
+
+`build.ps1` parameters (defaults shown):
+```
+-Root          (Get-Location).Path
+-Mode          "atlas"          # or "full"
+-TokensPerFile 80
+-AtlasBudget   2000
+-TagsOut       "tags.json"
+-VocabOut      "vocabulary.md"
+```
+
+`build.sh` positional args:
+```
+$1  MODE             default "atlas"
+$2  ATLAS_BUDGET     default 2000
+$3  TOKENS_PER_FILE  default 80
+```
+
+Both fail loudly if ctags is missing and print install hints.
+
+---
+
+## 20. `AGENT_PROMPT.md` (paste into the agent's system prompt)
+
+The file's job is to teach the agent the three-tier flow. Reproduce verbatim:
+
+````markdown
+## Codebase retrieval toolkit
+
+You have three retrieval primitives over this codebase, in order of cost:
+
+1. **`vocabulary.md`** is auto-attached. Read it first on every task. It
+   contains a folder atlas with PageRank scores, headline symbols per folder,
+   and a drill-in pointer (`--mode section --scope <prefix>`).
+
+2. **`python code-vocab/make_vocab.py --mode section --scope <folder>`** —
+   drills into one folder. Returns docstrings, public symbols, class fields,
+   and module-level constants for files in that folder. Costs ~1–3 k tokens.
+   Use when the atlas points at a folder but you need more detail.
+
+3. **`python code-vocab/vocab_find.py --tags tags.json [...] <query>`** —
+   symbol lookup. Two modes:
+   - **default** (definitions): "where is X *defined*?" — uses ctags.
+   - **`--usages --root .`**: "who *calls / imports* X?" — uses ripgrep.
+   Filters: `--scope <prefix>`, `--kind <function|class|method|...>`,
+   `--regex`, `--exact`, `--limit N`.
+
+### Routing rules
+
+| Question shape | Tool |
+|---|---|
+| "Where do I start? Orient me." | Already in `vocabulary.md` |
+| "Tell me about folder X" | `make_vocab.py --mode section --scope X` |
+| "Where is `Foo` defined?" | `vocab_find.py Foo` |
+| "Who calls `Foo`?" | `vocab_find.py --usages Foo --root .` |
+| "Find symbols matching `bar*`" | `vocab_find.py 'bar*'` |
+| "Symbols of kind class containing 'Manager'" | `vocab_find.py --kind class Manager` |
+
+### Critical contract
+
+- **`vocab_find` without `--usages` returns DEFINITIONS only.** For rename or
+  reference-check tasks, you MUST run `vocab_find --usages` (or grep) to find
+  the call-sites. Conflating the two will silently miss most usages.
+- **Read `vocabulary.md` before searching for concepts.** Map the user's words
+  to the atlas's headline symbols before picking a search term. A concept like
+  "authentication" probably appears in the codebase as `AuthStorage`,
+  `loginX`, `SessionManager`, etc. — surface those from the atlas first.
+- **Rebuild the index after large changes:** `.\code-vocab\build.ps1` (or
+  `./code-vocab/build.sh`). Incremental edits don't need a rebuild for most
+  tasks since cached PageRank survives.
+````
+
+---
+
+## 21. `gitignore.recommended`
+
+Exactly:
+
+```gitignore
+# Add these patterns to the host repo's .gitignore (or copy this file there).
+# Generated by code-vocab/build.{ps1,sh}.
+
+tags.json
+tags.json.cache
+vocabulary.md
+```
+
+---
+
+## 22. README.md outline
+
+Sections, in order: title + tagline → "What's in the box" file table → "Prerequisites" → "Install in any repo (90 seconds)" → "The three-tier flow" diagram + cost table → "Commands" cheat sheet → "Token economics" table → "What this is, what it isn't" → "How it works (one paragraph)" → "License" (public domain / CC0).
+
+---
+
+## 23. Orchestration (`main` of `make_vocab.py`)
+
+Exact sequence:
+
+```python
+def main():
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    tags_path = Path(args.tags) if args.tags else root / "tags.json"
+    out_path  = Path(args.out)  if args.out  else root / "vocabulary.md"
+
+    tags = load_tags(tags_path)
+    classes_by_file = defaultdict(list)
+    funcs_by_file   = defaultdict(list)
+    for t in tags:
+        if t.get("kind") == "class":
+            classes_by_file[t["path"]].append(t["name"])
+        if t.get("kind") in {"function", "method"}:
+            funcs_by_file[t["path"]].append(t["name"])
+
+    files, edges, defines, sym_refs, pr = build_graph_cached(root, tags_path, tags)
+    pr_total = sum(pr.values()) or 1.0
+    pr_pct = {f: 100.0 * pr.get(f, 0.0) / pr_total for f in files}
+
+    facts_by_file = {path: extract_facts(root, path) for path in funcs_by_file}
+    items_all = build_module_items(funcs_by_file, sym_refs, pr_pct,
+                                   facts_by_file, classes_by_file)
+
+    raw_routes = extract_routes(root, list(funcs_by_file.keys()))
+    routes_by_file = defaultdict(list)
+    for method, path, handler, file in raw_routes:
+        routes_by_file[file].append((method, path, handler))
+
+    out = render_header(root, args.mode, args.scope)
+
+    if args.mode == "atlas":
+        buckets = build_atlas_buckets(items_all, pr_pct, args.atlas_budget)
+        out.append(render_atlas(buckets, items_all, sym_refs, defines, routes_by_file))
+    else:
+        items = items_all
+        if args.mode == "section":
+            if not args.scope:
+                raise SystemExit("--scope is required when --mode section")
+            scope_prefix = args.scope.rstrip("/")
+            def in_scope(p):
+                rel = p.removeprefix("./")
+                return rel.startswith(scope_prefix + "/") or rel == scope_prefix
+            items = [it for it in items_all if in_scope(it.path)]
+            if not items:
+                raise SystemExit(f"no source files under scope: {args.scope}")
+            local_total = sum(it.pr_pct for it in items) or 1.0
+            for it in items:
+                it.pr_pct = 100.0 * it.pr_pct / local_total
+
+        if raw_routes and args.mode == "full":
+            out.append("## HTTP routes (FastAPI)")
+            for method, path, handler, _file in raw_routes:
+                out.append(f"- `{method:<6} {path}` → `{handler}`")
+            out.append("")
+
+        if args.mode == "full":
+            if gloss := extract_glossary(root):
+                out.append("## Domain notes (from README)")
+                for term, desc in gloss:
+                    out.append(f"- **{term}** — {desc}")
+                out.append("")
+            if tree := folder_tree(root):
+                out.append("## Folder structure")
+                out.extend(tree)
+                out.append("")
+
+        n_source = len(items)
+        budget = args.budget if args.budget is not None else args.tokens_per_file * n_source
+        selected = allocate(items, budget)
+        header = "## Modules"
+        if args.mode == "section":
+            header += f" in `{args.scope}/`"
+        header += f"  ·  budget: {budget} tok = {args.tokens_per_file} × {n_source} files"
+        out.append(header)
+        out.append("_Greedy detail allocation: L3 full → L2 summary → L1 brief → L0 listed._\n")
+
+        by_level = defaultdict(list)
+        for it in items:
+            if (sel := selected.get(it.path)) is None: continue
+            level, text = sel
+            by_level[level].append((it, text))
+        titles = {3: "L3 — Top (full)", 2: "L2 — Summary",
+                  1: "L1 — Brief",     0: "L0 — Listed"}
+        for level in (3, 2, 1, 0):
+            if level not in by_level: continue
+            out.append(f"### {titles[level]}")
+            for _it, text in by_level[level]:
+                out.append(text)
+                if level >= 2: out.append("")
+            out.append("")
+
+    text = "\n".join(out)
+    out_path.write_text(text, encoding="utf-8")
+    total = count_tokens(text)
+    try:    rel = out_path.relative_to(root)
+    except ValueError: rel = out_path
+    print(f"Wrote {rel}: {total} tok (mode={args.mode}, files indexed={len(files)})")
+```
+
+---
+
+## 24. Verified token economics
+
+For sizing intuition:
+
+| Repo | Source files | Atlas size | Typical per-task |
+|---|---:|---:|---:|
+| Tiny (~14 files) | 14 | ~413 tok | atlas + 1 read ≈ 1 k |
+| Medium (~668 files) | 668 | ~1,780 tok | atlas + 1 section + 1 find ≈ 5 k |
+
+If the whole vocabulary were auto-attached on the medium repo it would cost ~60 k tok per task; the atlas saves ~92% of that overhead.
+
+---
+
+## 25. Implementation order recommended for replication
+
+1. Stub `make_vocab.py` with the constants in §5.1, `count_tokens` (§6), `load_tags` (§7), and a no-op `main`.
+2. Add `safe_read`, `is_test_path`, `extract_python_facts`, `extract_lead_doc`, `extract_constants_generic`, `extract_facts`.
+3. Add `build_reference_graph`, `pagerank`, `build_graph_cached`. Verify cache round-trip on a tiny repo.
+4. Add `ModuleItem`, `build_module_items`, `allocate`. Render in `full` mode.
+5. Add `_file_folder`, `FolderBucket`, `build_atlas_buckets`, `render_atlas`. Render in `atlas` mode.
+6. Add `extract_routes`, `extract_glossary`, `folder_tree`, `project_metadata`, `render_header`.
+7. Add section-mode scope filter + local PR renormalization.
+8. Add `vocab_find.py` (definitions mode first, then `--usages` with ripgrep + Python fallback).
+9. Add `build.ps1` and `build.sh`. Verify ctags flag string is identical.
+10. Add `AGENT_PROMPT.md`, `README.md`, `gitignore.recommended`.
+11. Smoke test: `./code-vocab/build.sh atlas` on a foreign repo; confirm `vocabulary.md` ≤ 2 k tokens; confirm `vocab_find.py SomeKnownSymbol` finds it; confirm `--usages` works with and without ripgrep.
+
+That's the entire package.

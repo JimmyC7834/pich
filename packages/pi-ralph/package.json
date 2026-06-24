@@ -1,0 +1,45 @@
+{
+  "name": "@jc4649/pi-ralph",
+  "version": "0.1.0",
+  "type": "module",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "typebox": "^1.1.24"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.74.2",
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  },
+  "license": "MIT",
+  "author": "jc4649",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JimmyC7834/pich.git",
+    "directory": "packages/pi-ralph"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "coding-agent",
+    "extension",
+    "ralph"
+  ],
+  "files": [
+    "index.ts",
+    "src",
+    "prompts",
+    "README.md",
+    "LICENSE"
+  ],
+  "description": "pi coding-agent extension: pi-ralph"
+}
