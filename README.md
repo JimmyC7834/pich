@@ -6,12 +6,13 @@ Like pi itself — which is just four packages composed together — pich is man
 
 ## Design
 
-The harness is organized as **three layers**, each answering a different question about an agent's context window — plus a handful of quality-of-life extras. Together they keep the model well-fed, lean, and cheap to drive.
+The harness is organized as **four layers** — three about an agent's context window, one about how it writes code — plus a handful of quality-of-life extras. Together they keep the model well-fed, lean, disciplined, and cheap to drive.
 
 > **1 · Get the right information in** — so the model works from facts, not guesses.
 > **2 · Keep the context window lean** — so those facts cost as few tokens as possible.
 > **3 · Stay out of the way** — minimal, opt-in workflow tools instead of a heavy framework.
-> **+ Quality-of-life** — small ergonomics: memory, persona, notifications, dashboard.
+> **4 · Code with discipline and safety** — guardrails and coding-specialized behavior so changes stay correct and minimal.
+> **+ Quality-of-life** — small ergonomics: memory, notifications, dashboard.
 
 ### Layer 1 — Information fetching
 
@@ -19,10 +20,9 @@ Pull exactly the right code, docs, web content, and capabilities into context on
 
 | Package | Role |
 |---|---|
-| [`pi-semble`](packages/pi-semble) | Semantic + lexical search over this repo's code **and** the local doc library (`repo_search` / `kb_search` / `find_related`). |
+| [`pi-semble`](packages/pi-semble) | Semantic + lexical search and indexing over this repo's code **and** the local doc library (`repo_search` / `kb_search` / `find_related`). Quick, token-less pinpoint information retrieval. |
 | [`pi-web-tools`](packages/pi-web-tools) | Web search, URL fetch, GitHub clone, PDF/YouTube/video extraction. |
 | [`pi-capability-index`](packages/pi-capability-index) | Skill/tool registry: discover, activate, and load only the capabilities a task needs. |
-| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored `read`/`edit` — precise reads and edits that survive reordering and compaction. |
 | `code-vocab` *(umbrella glue)* | ctags symbol atlas; redirects naive code discovery to structured lookups. |
 
 ### Layer 2 — Token & context-window optimization
@@ -46,7 +46,17 @@ Small, opt-in tools — not a framework. Each is one focused capability you can 
 | [`pi-ralph`](packages/pi-ralph) | Kanban task board + iterative loop for structured multi-step work. |
 | [`filechanges`](packages/filechanges) | Live diff review of every edit, with accept / revert (fork of pi-config). |
 | [`telegram-remote`](packages/telegram-remote) | Drive a session from a Telegram bot — set a token and go. |
-| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard, reminder injection, and destructive-bash guard. |
+
+### Layer 4 — Coding guardrails & specialization
+
+Make pi a *coding* agent specifically: stop dangerous or sloppy actions before they land, and steer the model toward correct, minimal changes.
+
+| Package | Role |
+|---|---|
+| [`pi-toolcall-guard`](packages/pi-toolcall-guard) | Preflight path/content guard, reminder injection, and destructive-bash guard — blocks workspace escapes and catastrophic shell commands, redirects raw `cat`/`grep`/`sed` to dedicated tools. |
+| [`pi-hashline-edit`](packages/pi-hashline-edit) | Hash-anchored `read`/`edit`: every edit cites a `LINE#HASH`, so stale or misaligned edits are rejected instead of silently corrupting a file. |
+| `ponytail-lite` *(umbrella glue)* | Lazy senior-dev persona (`off`/`lite`/`full`/`ultra`) — enforces the stdlib-first "ladder", bans speculative abstractions, mandates one self-check per non-trivial change. |
+| `zz-design-principles` *(umbrella glue)* | Injects a software-design manifesto + surgical-changes discipline (loads last so other injectors compose first). |
 
 ### Quality-of-life extras
 
@@ -56,8 +66,6 @@ Small ergonomics that make the harness pleasant to live in. The single-file ones
 |---|---|
 | [`notify`](packages/notify) | Native terminal notification (OSC 777/99 / Windows Toast) when the agent asks a question or finishes a turn. |
 | `memory` *(umbrella glue)* | Always-on long-term memory — hand-editable one-liner facts injected each turn. |
-| `ponytail-lite` *(umbrella glue)* | Lazy senior-dev persona (`off`/`lite`/`full`/`ultra`) that enforces minimal, stdlib-first solutions. |
-| `zz-design-principles` *(umbrella glue)* | Injects a software-design manifesto + surgical-changes discipline (loads last so others compose first). |
 | `startup-logo` *(umbrella glue)* | Custom startup dashboard: ASCII logo + session/model/branch info. |
 | `sysprompt-to-user` *(umbrella glue)* | Surfaces system-prompt content to the user for transparency. |
 
