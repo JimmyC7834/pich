@@ -44,6 +44,7 @@ Touch only what you must. Clean up only your own mess.
 - Remove imports/variables/functions that YOUR changes made unused. Leave pre-existing dead code alone unless asked.
 
 Every changed line should trace directly to the request.
+Every implementation should follow the TDD (Test Driven Development) approach
 
 Tiebreaker for any decision: which option reduces complexity and is easier to change?`,
     };

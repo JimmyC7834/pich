@@ -23,3 +23,5 @@ __pycache__/
 # OS / editor cruft
 nul
 .DS_Store
+
+.pi/
